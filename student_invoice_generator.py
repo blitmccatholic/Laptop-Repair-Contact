@@ -6,7 +6,6 @@ Run:
     python student_invoice_generator.py
 """
 import os
-import tempfile
 from decimal import Decimal
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -14,7 +13,7 @@ from tkinter import ttk, messagebox, filedialog
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
-from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 # Staff Member (CHANGE TO YOUR NAME)
@@ -29,7 +28,8 @@ except Exception:
 
 # File paths
 LETTERHEAD_LOGO = "Logo.png"
-FOOTER_IMAGE = "Footer.png"  # put in working folder
+FOOTER_IMAGE = "Footer.png"
+SIGNATURE_IMAGE = "Signature.JPG"
 CONTACT_INFO = (
     "23 Amsterdam Crescent,<br/>",
     "Salisbury Downs, SA<br/>",
@@ -71,7 +71,6 @@ class InvoiceApp(tk.Tk):
         ttk.Radiobutton(status_frame, text="Missing", variable=self.device_status, value="Missing").grid(row=0, column=1, padx=6)
         ttk.Radiobutton(status_frame, text="Damaged", variable=self.device_status, value="Damaged").grid(row=0, column=2, padx=6)
 
-        # Items frame
         itemsfrm = ttk.LabelFrame(frm, text="Items")
         itemsfrm.pack(fill=tk.BOTH, expand=True)
 
@@ -95,8 +94,8 @@ class InvoiceApp(tk.Tk):
         self.tree = ttk.Treeview(right, columns=("item", "cost"), show="headings", selectmode='browse')
         self.tree.heading('item', text='Item')
         self.tree.heading('cost', text='Cost')
-        self.tree.column('item', width=380)
-        self.tree.column('cost', width=120, anchor=tk.E)
+        self.tree.column('item', width=340)
+        self.tree.column('cost', width=160, anchor=tk.E)
         self.tree.pack(fill=tk.BOTH, expand=True)
 
         totalfrm = ttk.Frame(frm)
@@ -146,11 +145,8 @@ class InvoiceApp(tk.Tk):
     # ------------------------ PDF Header ------------------------
     def draw_header(self, canvas, doc):
         page_width, page_height = A4
-
-        # Maximum logo size
         max_logo_width_mm = 60
         max_logo_height_mm = 30
-
         left_padding_mm = 10
         top_padding_mm = 10
 
@@ -168,7 +164,6 @@ class InvoiceApp(tk.Tk):
         from reportlab.lib.enums import TA_RIGHT
         styleR = ParagraphStyle('Right', parent=getSampleStyleSheet()['Normal'], alignment=TA_RIGHT, fontSize=9)
         contact_text = ''.join(CONTACT_INFO)
-        from reportlab.platypus import Paragraph
         p = Paragraph(contact_text, styleR)
         w, h = p.wrap(page_width - 100*mm, 100)
         p.drawOn(canvas, page_width - left_padding_mm*mm - w, page_height - h - top_padding_mm*mm)
@@ -177,13 +172,10 @@ class InvoiceApp(tk.Tk):
     def draw_footer(self, canvas, doc):
         page_width, page_height = A4
         if os.path.exists(FOOTER_IMAGE):
-            max_footer_width_mm = 160  # bigger width
-            max_footer_height_mm = 30  # bigger height
-
-            # Lower position: 5 mm from bottom
+            max_footer_width_mm = 160
+            max_footer_height_mm = 30
             x = (page_width - max_footer_width_mm*mm) / 2
             y = -5*mm
-
             canvas.drawImage(
                 FOOTER_IMAGE,
                 x,
@@ -196,14 +188,12 @@ class InvoiceApp(tk.Tk):
 
     # ------------------------ Build PDF ------------------------
     def build_pdf(self, pdf_path):
-        normal = ParagraphStyle(
-            'Normal',
-            parent=getSampleStyleSheet()['Normal'],
-            fontName='Helvetica',
-            fontSize=11,
-            leading=16,
-            spaceAfter=10
-        )
+        normal = ParagraphStyle('Normal', parent=getSampleStyleSheet()['Normal'], fontName='Helvetica', fontSize=11, leading=16, spaceAfter=10)
+        bold = ParagraphStyle('Bold', parent=getSampleStyleSheet()['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=16, spaceAfter=10)
+        date_style = ParagraphStyle('Date', parent=getSampleStyleSheet()['Normal'], fontName='Helvetica', fontSize=11, leading=16, spaceAfter=10)
+
+        from datetime import datetime
+        today = datetime.today().strftime("%d %B %Y").lstrip("0")
 
         doc = SimpleDocTemplate(pdf_path, pagesize=A4,
                                 leftMargin=20*mm, rightMargin=20*mm,
@@ -213,18 +203,22 @@ class InvoiceApp(tk.Tk):
 
         parent = self.parent_entry.get().strip()
         student = self.student_entry.get().strip()
-        status = self.device_status.get().lower()  # missing or damaged
+        status = self.device_status.get().lower()
+
+        # Date & Subject
+        elements.append(Paragraph(today, date_style))
+        elements.append(Paragraph(f"RE: Thomas More College {status.capitalize()} Device", bold))
+        elements.append(Spacer(1, 12))
 
         # Greeting
-        elements.append(Paragraph(f"Hi {parent},", normal))
+        elements.append(Paragraph(f"<br/><br/>Hi {parent},", normal))
 
-        # First paragraph
+        # Body text
         text1 = (f"I am writing to inform you that {student} has recently visited the ICT office "
                  f"with a {status} device. As per the TMC User Device Charter, any cost "
                  "relating to the repair or replacement of devices or accessories is passed on to the family.")
         elements.append(Paragraph(text1, normal))
 
-        # Second paragraph
         text2 = ("The cost for the repair and replacement is as below, and you will receive an invoice "
                  "from our Finance department for this amount.")
         elements.append(Paragraph(text2, normal))
@@ -232,12 +226,9 @@ class InvoiceApp(tk.Tk):
 
         # Items table
         if self.items:
-            data = [["Item", "Cost ($)"]]
-            for name, cost in self.items:
-                data.append([name, f"{cost:.2f}"])
-            total = sum(cost for (_n, cost) in self.items)
+            data = [["Item", "Cost ($)"]] + [[n, f"{c:.2f}"] for n, c in self.items]
+            total = sum(c for (_n, c) in self.items)
             data.append(["Total", f"{total:.2f}"])
-
             tbl = Table(data, colWidths=[120*mm, 30*mm])
             tbl.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
@@ -254,16 +245,22 @@ class InvoiceApp(tk.Tk):
             elements.append(Spacer(1, 12))
 
         # Closing paragraph
-        text3 = ("<br/>Feel free to contact us by replying to this email if you have any questions "
-                 "or if you would like to discuss this matter further.")
-        elements.append(Paragraph(text3, normal))
+        elements.append(Paragraph("<br/>Feel free to contact us by replying to this email if you have any questions "
+                                  "or if you would like to discuss this matter further.", normal))
         elements.append(Spacer(1, 12))
 
         # Signature
-        signature = "Kind regards,<br/>Thomas More College ICT Team"
-        elements.append(Paragraph(signature, normal))
+        elements.append(Paragraph("Yours Sincerely,", normal))
+        if os.path.exists(SIGNATURE_IMAGE):
+            sig_img = Image(SIGNATURE_IMAGE)
+            sig_img.drawHeight = 25*mm
+            sig_img.drawWidth = sig_img.drawHeight * sig_img.imageWidth / sig_img.imageHeight
+            sig_img.hAlign = 'LEFT'  # <--- left align the image
+            elements.append(sig_img)
+            elements.append(Spacer(1, 6))
+        elements.append(Paragraph("Angelo Anastasiadis", normal))
+        elements.append(Paragraph("ICT Manager", bold))
 
-        # Build PDF with header and footer
         doc.build(elements,
                   onFirstPage=lambda c, d: (self.draw_header(c,d), self.draw_footer(c,d)),
                   onLaterPages=lambda c, d: self.draw_footer(c,d))
@@ -273,27 +270,19 @@ class InvoiceApp(tk.Tk):
         if not self.items:
             messagebox.showwarning("No items", "Please add at least one item before generating.")
             return
-
         student = self.student_entry.get().strip()
         parent = self.parent_entry.get().strip()
         status = self.device_status.get()
         if not student or not parent:
             messagebox.showwarning("Missing details", "Please enter both Student Name and Parent Name.")
             return
-
         safe_student = student.replace(" ", "_")
         default_name = f"TMC_{status}_Device_{safe_student}.pdf"
-
-        save_path = filedialog.asksaveasfilename(
-            defaultextension='.pdf',
-            filetypes=[('PDF files', '*.pdf')],
-            initialfile=default_name,
-            title="Save PDF as..."
-        )
+        save_path = filedialog.asksaveasfilename(defaultextension='.pdf', filetypes=[('PDF files', '*.pdf')],
+                                                 initialfile=default_name, title="Save PDF as...")
         if not save_path:
             messagebox.showinfo("Cancelled", "PDF generation cancelled.")
             return
-
         try:
             self.build_pdf(save_path)
         except Exception as e:
@@ -303,19 +292,16 @@ class InvoiceApp(tk.Tk):
         if not OUTLOOK_AVAILABLE:
             messagebox.showerror("Outlook not available", "pywin32/win32com is not installed or Outlook automation is unavailable.")
             return
-
         try:
             app = win32com.client.Dispatch('Outlook.Application')
             mail = app.CreateItem(0)
             mail.Subject = f"Thomas More College {status} Device"
-            mail.Body = (
-                f"Hi {parent},\n\n"
-                f"I am writing in regard to a {status.lower()} device that {student} has brought into the office. "
-                "As per the TMC Device Charter Policy, any costs are passed onto the supporting family.\n\n"
-                "Please refer to the attached letter for full details.\n\n"
-                "Feel free to contact us by replying to this email if you have any questions or if you would like to discuss this matter further.\n\n"
-                f"Kind regards,\n{STAFF_MEMBER}"
-            )
+            mail.Body = (f"Hi {parent},\n\n"
+                         f"I am writing in regard to a {status.lower()} device that {student} has brought into the office. "
+                         "As per the TMC Device Charter Policy, any costs are passed onto the supporting family.\n\n"
+                         "Please refer to the attached letter for full details.\n\n"
+                         "Feel free to contact us by replying to this email if you have any questions or if you would like to discuss this matter further.\n\n"
+                         f"Kind regards,\n{STAFF_MEMBER}")
             mail.Attachments.Add(save_path)
             mail.Display(True)
             messagebox.showinfo("Done", "PDF saved and Outlook draft opened.")
@@ -327,21 +313,14 @@ class InvoiceApp(tk.Tk):
         if not self.items:
             messagebox.showwarning("No items", "Please add at least one item before saving.")
             return
-
         student = self.student_entry.get().strip()
         status = self.device_status.get()
         if not student:
             messagebox.showwarning("Missing details", "Please enter a Student Name before saving.")
             return
-
         safe_student = student.replace(" ", "_")
         default_name = f"TMC_{status}_Device_{safe_student}.pdf"
-
-        fn = filedialog.asksaveasfilename(
-            defaultextension='.pdf',
-            filetypes=[('PDF files', '*.pdf')],
-            initialfile=default_name
-        )
+        fn = filedialog.asksaveasfilename(defaultextension='.pdf', filetypes=[('PDF files', '*.pdf')], initialfile=default_name)
         if not fn:
             return
         try:
@@ -349,7 +328,6 @@ class InvoiceApp(tk.Tk):
             messagebox.showinfo("Saved", f"PDF saved to: {fn}")
         except Exception as e:
             messagebox.showerror("Save error", f"Failed to save PDF: {e}")
-
 
 if __name__ == '__main__':
     app = InvoiceApp()
